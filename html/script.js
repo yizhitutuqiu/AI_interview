@@ -641,7 +641,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error("[AI 助理] 截屏分析异常:", error);
             // 异常降频
-            currentAnalysisInterval = 30000;
+            currentAnalysisInterval = 5000;
         } finally {
             isAnalyzing = false;
         }
