@@ -560,6 +560,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 保存上一次 AI 助理情感分析的提示状态
     let lastEmotionMessage = "正在分析您的状态，随时为您提供鼓励和建议...";
     let lastEmotionType = "info";
+    // 保存当前 UI 上实际显示的最后一条文本，用于防止重复弹窗
+    let lastDisplayedMessage = "";
     // 标记当前是否正处于“人脸检测异常”的警告状态
     let isFaceWarningActive = false;
 
@@ -714,6 +716,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function addAssistantMessage(text, type = 'info') {
+        // 防止相同的提示内容重复弹窗导致视觉干扰
+        if (text === lastDisplayedMessage) {
+            return;
+        }
+        lastDisplayedMessage = text;
+
         // 覆盖模式：清空之前的所有内容，只显示最新的一条提示
         assistantContent.innerHTML = '';
         

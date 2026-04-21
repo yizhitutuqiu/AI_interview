@@ -1,0 +1,1 @@
+face_detector: "haar"  # 可选: "mtcnn" 或 "haar"
