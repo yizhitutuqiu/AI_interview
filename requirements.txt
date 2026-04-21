@@ -4,7 +4,10 @@ volcengine-python-sdk[ark]>=1.0.126
 python-dotenv
 httpx
 opencv-python
-mtcnn==0.1.1
-tensorflow-macos==2.15.0; sys_platform == 'darwin' and platform_machine == 'arm64'
-tensorflow==2.15.0; sys_platform != 'darwin' or platform_machine != 'arm64'
 pyyaml
+
+# === 可选依赖 (Optional) ===
+# 如果你在 configs/config.yaml 中设置了 face_detector: "mtcnn"，则需要取消下面三行的注释并安装：
+# mtcnn==0.1.1
+# tensorflow-macos==2.15.0; sys_platform == 'darwin' and platform_machine == 'arm64'
+# tensorflow==2.15.0; sys_platform != 'darwin' or platform_machine != 'arm64'
