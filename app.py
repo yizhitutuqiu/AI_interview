@@ -1,6 +1,8 @@
+import base64
 import os
 import json
-import requests
+import logging
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +11,10 @@ from pydantic import BaseModel
 from typing import List, Dict
 from volcenginesdkarkruntime import Ark
 from dotenv import load_dotenv
+
+# 设置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("ai_interview")
 
 # 加载 .env 文件中的环境变量
 load_dotenv()
@@ -181,73 +187,84 @@ async def generate_report(request: ReportRequest):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/api/analyze_emotion")
-async def analyze_emotion(request: EmotionRequest):
-    if DOUBAO_API_KEY == "YOUR_DOUBAO_API_KEY" or DOUBAO_ENDPOINT_ID == "YOUR_ENDPOINT_ID":
-        return JSONResponse(status_code=500, content={"error": "系统未配置 API Key"})
-
+async def analyze_emotion(request: Request):
     try:
-        # Lite 模型的 Endpoint，固定为火山引擎给定的 Lite 视觉模型 endpoint
-        # 注意：这里直接调用 HTTP API，而非 SDK，因为要求使用 lite 多模态
-        url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+        data = await request.json()
+        base64_image = data.get("image")
         
+        logger.info(f"======== 收到前端图片 ========")
+        logger.info(f"图片长度: {len(base64_image) if base64_image else 'None'}")
+        
+        if not base64_image:
+            logger.warning("前端未提供图片数据")
+            return JSONResponse(status_code=400, content={"error": "未提供图片数据"})
+        
+        # 移除 base64 的 data:image/jpeg;base64, 前缀
+        if "," in base64_image:
+            base64_image = base64_image.split(",")[1]
+            
         headers = {
             "Authorization": f"Bearer {DOUBAO_API_KEY}",
             "Content-Type": "application/json"
         }
         
-        system_prompt = (
-            "你是一个友好的AI面试助理。我将给你看一张被面试者在面试过程中的摄像头截图。"
-            "你需要判断被试者的情绪（紧张、放松、沮丧、走神等），并判断是否需要安慰、鼓励或提醒（比如提醒不要东张西望）。"
-            "你的回复必须是一句简短的话（不超过30个字）。语气要非常友好、温柔、有亲和力。"
-            "如果你觉得候选人状态很好，不需要特别的提醒，你可以给出一句简短的鼓励（如：状态不错，继续保持！）。"
-            "输出格式必须是 JSON，结构为：{\"message\": \"你的提示语\", \"type\": \"info|warning|success\"}"
-        )
-
+        logger.info(f"使用的 LITE 模型 ID: {DOUBAO_LITE_ENDPOINT_ID}")
+        
         payload = {
             "model": DOUBAO_LITE_ENDPOINT_ID,
-            "messages": [
+            "input": [
                 {
                     "role": "user",
                     "content": [
                         {
-                            "type": "text",
-                            "text": system_prompt + "\n\n请分析我的状态并给出助理提示。"
+                            "type": "input_image",
+                            "image_url": f"data:image/jpeg;base64,{base64_image}"
                         },
                         {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": request.image
-                            }
+                            "type": "input_text",
+                            "text": "观察图片中面试者的状态（如紧张、自信、走神、迷茫等）。如果状态良好，请简短地鼓励他。如果状态不好，请给出简短的建议或安慰。请严格以 JSON 格式返回，包含 'message' 和 'type' 两个字段。type 只能是 'info', 'warning', 'success' 之一。如果没看到人脸，返回 type 为 'warning'，message 提示找不到人。"
                         }
                     ]
                 }
             ]
         }
-
-        # 打印 payload 排查问题
-        # print("Payload sending to Ark API:", json.dumps(payload, ensure_ascii=False)[:200] + "...")
-        # 延长超时时间到 30 秒，多模态模型处理图片有时会比较慢
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
+        logger.info("准备发起火山引擎 HTTP 请求...")
         try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://ark.cn-beijing.volces.com/api/v3/responses",
+                    headers=headers,
+                    json=payload
+                )
+            response.raise_for_status()
             response_json = response.json()
-        except Exception:
-            response_json = response.text
-                
-            if response.status_code != 200:
-                print(f"火山引擎接口报错: HTTP {response.status_code} - {response_json}")
-                return JSONResponse(status_code=500, content={"error": "Vision API Error", "details": response_json})
-
+            logger.info("HTTP 请求火山引擎成功，开始解析...")
+            
             # 解析结果
             try:
-                content = response_json["choices"][0]["message"]["content"]
-                print(f"[Emotion API] 大模型原始回复: {content}")
+                # 兼容不同模型的返回结构
+                content = ""
+                if "choices" in response_json:
+                    content = response_json["choices"][0]["message"]["content"]
+                elif "output" in response_json:
+                    # doubao-seed 多模态模型的返回结构
+                    for item in response_json["output"]:
+                        if item.get("type") == "message" and "content" in item:
+                            for c in item["content"]:
+                                if c.get("type") == "output_text":
+                                    content = c.get("text", "")
+                                    break
+                            
+                logger.info(f"[Emotion API] 大模型原始回复: {content}")
                 
                 if not content:
+                    logger.info("[Emotion API] 大模型回复为空，返回默认 success")
                     return {"message": "状态不错，继续保持！", "type": "success"}
                 
                 content = content.strip()
                 if content == "NONE" or content == '"NONE"':
+                    logger.info("[Emotion API] 大模型回复了 NONE，返回默认 success")
                     return {"message": "状态不错，继续保持！", "type": "success"}
                     
                 # 处理大模型有时可能包裹的 markdown
@@ -257,6 +274,7 @@ async def analyze_emotion(request: EmotionRequest):
                 
                 # 尝试将回答解析为 JSON 格式
                 result = json.loads(content.strip())
+                logger.info(f"[Emotion API] 解析为 JSON 成功: {result}")
                 return {
                     "message": result.get("message", "NONE"),
                     "type": result.get("type", "info")
@@ -264,16 +282,22 @@ async def analyze_emotion(request: EmotionRequest):
             except json.JSONDecodeError:
                 # 如果大模型没有返回 JSON，而是返回了纯文本
                 if "NONE" in content.upper() or len(content.strip()) < 2:
+                    logger.info(f"[Emotion API] 非 JSON 且含 NONE: {content}")
                     return {"message": "状态不错，继续保持！", "type": "success"}
                 else:
+                    logger.info(f"[Emotion API] 非 JSON 纯文本回复: {content}")
                     return {"message": content.strip(), "type": "info"}
             except KeyError as e:
-                print(f"解析火山引擎返回值失败: {e}, 原始返回值: {response_json}")
+                logger.error(f"解析火山引擎返回值失败: {e}, 原始返回值: {response_json}")
                 return {"message": "状态不错，继续保持！", "type": "success"}
                 
+        except Exception as e:
+            logger.error(f"请求火山引擎发生异常: {str(e)}")
+            return JSONResponse(status_code=500, content={"error": f"请求火山引擎失败: {str(e)}"})
+            
     except Exception as e:
-        print(f"请求火山引擎发生异常: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": f"请求火山引擎失败: {str(e)}"})
+        logger.error(f"analyze_emotion 发生未捕获的异常: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 # 挂载前端静态文件 (必须放在所有 API 路由之后)
 class NoCacheStaticFiles(StaticFiles):
