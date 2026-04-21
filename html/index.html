@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 面试官</title>
-    <link rel="stylesheet" href="style.css">
+    <!-- 每次页面加载时附带时间戳，防止浏览器缓存旧版本 -->
+    <script>
+        document.write('<link rel="stylesheet" href="style.css?v=' + new Date().getTime() + '">');
+    </script>
     <!-- 引入 FontAwesome 以使用麦克风图标 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- 引入 ECharts 用于绘制雷达图 -->
@@ -127,7 +130,7 @@
                 <button id="mic-btn" class="icon-btn" title="点击开始语音输入">
                     <i class="fa-solid fa-microphone"></i>
                 </button>
-                <textarea id="text-input" placeholder="输入您的回答... (按 Enter 发送)" rows="1"></textarea>
+                <textarea id="text-input" placeholder="输入您的回答... (双击 Enter 发送)" rows="1"></textarea>
                 <button id="send-btn" class="primary-btn">发送</button>
             </div>
             <div id="voice-status" class="voice-status hidden">正在聆听... (请说话)</div>
@@ -186,6 +189,23 @@
             <div class="assistant-header">
                 <h3><i class="fa-solid fa-robot"></i> AI 助理</h3>
             </div>
+            
+            <!-- AI 助理视觉实体交互区 (居中占据主体) -->
+            <div class="assistant-visual-area">
+                <div class="assistant-avatar" id="assistant-avatar">
+                    <div class="avatar-face" id="avatar-face">
+                        <!-- 默认表情 -->
+                        <i class="fa-regular fa-face-smile"></i>
+                    </div>
+                    <div class="avatar-ring"></div>
+                    <div class="avatar-ring outer"></div>
+                </div>
+                <div class="assistant-status-text" id="assistant-status-text">
+                    保持放松，准备面试
+                </div>
+            </div>
+
+            <!-- 提示消息悬浮区 (底部) -->
             <div class="assistant-content" id="assistant-content">
                 <div class="assistant-msg info">
                     正在分析您的状态，随时为您提供鼓励和建议...
@@ -195,6 +215,8 @@
 
     </div>
 
-    <script src="script.js"></script>
+    <script>
+        document.write('<script src="script.js?v=' + new Date().getTime() + '"><\/script>');
+    </script>
 </body>
 </html>

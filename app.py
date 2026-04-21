@@ -2,7 +2,7 @@ import os
 import json
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -38,18 +38,31 @@ class ChatRequest(BaseModel):
     answer_time: int
     messages: List[Dict[str, str]]
 
+class ReportRequest(BaseModel):
+    company_type: str
+    job_role: str
+    think_time: int
+    answer_time: int
+    messages: List[Dict[str, str]]
+    assistant_observations: List[str] = []
+
 class EmotionRequest(BaseModel):
     image: str # Base64 格式的图片数据
 
 @app.post("/api/chat")
 async def chat_with_ai(request: ChatRequest):
+    # 计算用户发言的轮数（保底机制判断）
+    user_turns = sum(1 for msg in request.messages if msg.get("role") == "user")
+    
     # 动态构建系统提示词，植入面试场景和限时要求
     system_prompt = (
         f"你是一个专业的AI面试官。目前代表【{request.company_type}】面试候选人的【{request.job_role}】岗位。\n"
+        f"当前面试进度：你已经向候选人提问了 {user_turns} 轮。\n"
         f"请根据候选人的回答进行专业、客观的追问、点评。你的目标是考察候选人的专业能力和软技能。\n"
         f"每次只问一个问题，不要长篇大论，语气自然、专业、贴合该类型公司和岗位的实际工作背景。\n"
-        f"【重要规则】：由于系统给候选人设置了严格的时限（思考时间：{request.think_time}秒，回答时间：{request.answer_time}秒），"
-        f"所以你的提问必须简洁明了，确保候选人能在上述短时间内完成思考并作答。"
+        f"【重要规则1】：由于系统给候选人设置了严格的时限（思考时间：{request.think_time}秒，回答时间：{request.answer_time}秒），"
+        f"所以你的提问必须简洁明了，确保候选人能在上述短时间内完成思考并作答。\n"
+        f"【重要规则2（结束机制）】：当前候选人已经回答了 {user_turns} 轮问题。如果 {user_turns} 小于 5，你必须继续提问，绝对不能结束面试。如果 {user_turns} 大于或等于 5，你可以根据候选人的回答质量自主决定是否继续深入提问，或者选择结束面试。当你决定结束面试时，你必须在你的回复末尾附加上精确的字符串 [INTERVIEW_FINISHED] 作为结束标记。例如：'好的，感谢您的回答，今天的面试就到这里。我们会尽快通知您结果。[INTERVIEW_FINISHED]'"
     )
     
     system_message = {
@@ -95,18 +108,22 @@ async def chat_with_ai(request: ChatRequest):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/api/report")
-async def generate_report(request: ChatRequest):
+async def generate_report(request: ReportRequest):
     if DOUBAO_API_KEY == "YOUR_DOUBAO_API_KEY" or DOUBAO_ENDPOINT_ID == "YOUR_ENDPOINT_ID":
         return JSONResponse(
             status_code=500, 
             content={"error": "系统未配置：请先在 .env 文件中填写 DOUBAO_API_KEY 和 DOUBAO_ENDPOINT_ID。"}
         )
 
+    # 提取行为观察记录
+    obs_text = "\n".join([f"- {obs}" for obs in request.assistant_observations]) if request.assistant_observations else "无特别行为观察记录"
+
     # 构造用于生成评估报告的系统提示词，强制要求返回 JSON 格式
     system_prompt = (
-        f"你是一个资深的HR和技术面试官。请根据以下候选人与AI面试官的对话历史，对候选人进行全面的面试评估。\n"
+        f"你是一个资深的HR和技术面试官。请根据以下候选人与AI面试官的对话历史，以及AI助理对候选人在面试过程中的行为状态观察，对候选人进行全面的面试评估。\n"
         f"候选人应聘的是【{request.company_type}】的【{request.job_role}】岗位。\n"
-        f"请必须以严格的 JSON 格式输出你的评估结果，不要包含任何 markdown 代码块标记(如 ```json)或其他多余说明文字。\n"
+        f"【AI助理行为观察记录】:\n{obs_text}\n\n"
+        f"请综合候选人的回答内容以及行为表现（如是否紧张、是否走神等），以严格的 JSON 格式输出你的评估结果，不要包含任何 markdown 代码块标记(如 ```json)或其他多余说明文字。\n"
         f"JSON 结构必须如下：\n"
         "{\n"
         '  "total_score": 85, // 综合得分，0-100的整数\n'
@@ -182,7 +199,7 @@ async def analyze_emotion(request: EmotionRequest):
             "你是一个友好的AI面试助理。我将给你看一张被面试者在面试过程中的摄像头截图。"
             "你需要判断被试者的情绪（紧张、放松、沮丧、走神等），并判断是否需要安慰、鼓励或提醒（比如提醒不要东张西望）。"
             "你的回复必须是一句简短的话（不超过30个字）。语气要非常友好、温柔、有亲和力。"
-            "如果你觉得候选人状态很好，不需要特别的提醒，请直接返回大写的 'NONE'，不要有其他任何字符。"
+            "如果你觉得候选人状态很好，不需要特别的提醒，你可以给出一句简短的鼓励（如：状态不错，继续保持！）。"
             "输出格式必须是 JSON，结构为：{\"message\": \"你的提示语\", \"type\": \"info|warning|success\"}"
         )
 
@@ -209,36 +226,69 @@ async def analyze_emotion(request: EmotionRequest):
 
         # 打印 payload 排查问题
         # print("Payload sending to Ark API:", json.dumps(payload, ensure_ascii=False)[:200] + "...")
-
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        # 延长超时时间到 30 秒，多模态模型处理图片有时会比较慢
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
-        if response.status_code == 200:
-            resp_data = response.json()
-            content = resp_data["choices"][0]["message"]["content"].strip()
-            
-            if content == "NONE" or content == '"NONE"':
-                return {"message": "NONE"}
+        try:
+            response_json = response.json()
+        except Exception:
+            response_json = response.text
                 
-            # 清理可能的 markdown
-            if content.startswith("```json"): content = content[7:]
-            if content.startswith("```"): content = content[3:]
-            if content.endswith("```"): content = content[:-3]
-            
+            if response.status_code != 200:
+                print(f"火山引擎接口报错: HTTP {response.status_code} - {response_json}")
+                return JSONResponse(status_code=500, content={"error": "Vision API Error", "details": response_json})
+
+            # 解析结果
             try:
+                content = response_json["choices"][0]["message"]["content"]
+                print(f"[Emotion API] 大模型原始回复: {content}")
+                
+                if not content:
+                    return {"message": "状态不错，继续保持！", "type": "success"}
+                
+                content = content.strip()
+                if content == "NONE" or content == '"NONE"':
+                    return {"message": "状态不错，继续保持！", "type": "success"}
+                    
+                # 处理大模型有时可能包裹的 markdown
+                if content.startswith("```json"): content = content[7:]
+                if content.startswith("```"): content = content[3:]
+                if content.endswith("```"): content = content[:-3]
+                
+                # 尝试将回答解析为 JSON 格式
                 result = json.loads(content.strip())
-                return result
+                return {
+                    "message": result.get("message", "NONE"),
+                    "type": result.get("type", "info")
+                }
             except json.JSONDecodeError:
-                # 如果没按要求返回 JSON，就把纯文本包起来
-                return {"message": content, "type": "info"}
-        else:
-            return JSONResponse(status_code=response.status_code, content={"error": response.text})
-            
+                # 如果大模型没有返回 JSON，而是返回了纯文本
+                if "NONE" in content.upper() or len(content.strip()) < 2:
+                    return {"message": "状态不错，继续保持！", "type": "success"}
+                else:
+                    return {"message": content.strip(), "type": "info"}
+            except KeyError as e:
+                print(f"解析火山引擎返回值失败: {e}, 原始返回值: {response_json}")
+                return {"message": "状态不错，继续保持！", "type": "success"}
+                
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        print(f"请求火山引擎发生异常: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"请求火山引擎失败: {str(e)}"})
 
 # 挂载前端静态文件 (必须放在所有 API 路由之后)
+class NoCacheStaticFiles(StaticFiles):
+    def is_not_modified(self, response_headers, request_headers) -> bool:
+        return False
+        
+    def file_response(self, full_path: os.PathLike, stat_result: os.stat_result, scope, status_code: int = 200) -> FileResponse:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
 html_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "html")
-app.mount("/", StaticFiles(directory=html_dir, html=True), name="html")
+app.mount("/", NoCacheStaticFiles(directory=html_dir, html=True), name="html")
 
 # 启动服务器的入口
 if __name__ == "__main__":

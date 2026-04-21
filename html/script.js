@@ -31,6 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const snapshotCanvas = document.getElementById('snapshot-canvas');
     const assistantSidebar = document.getElementById('ai-assistant-sidebar');
     const assistantContent = document.getElementById('assistant-content');
+    const assistantAvatar = document.getElementById('assistant-avatar');
+    const avatarFace = document.getElementById('avatar-face');
+    const assistantStatusText = document.getElementById('assistant-status-text');
 
     let videoStream = null;
     let emotionAnalysisTimer = null;
@@ -45,6 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 存储对话历史
     let messageHistory = [];
+    // 存储 AI 助理观察记录
+    let assistantObservations = [];
 
     // 定时器相关变量
     let timerInterval = null;
@@ -67,9 +72,15 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
             userVideo.srcObject = videoStream;
+            console.log("[系统] 摄像头初始化成功");
+            
+            // 当视频元数据加载完毕后再启动 AI 助理定时器，确保 videoWidth 有值
+            userVideo.onloadedmetadata = () => {
+                console.log(`[系统] 视频加载完毕，分辨率: ${userVideo.videoWidth}x${userVideo.videoHeight}`);
+            };
         } catch (err) {
             console.error("无法获取摄像头权限:", err);
-            addAssistantMessage("未能获取到摄像头权限，视频流分析功能已停用。", "warning");
+            addAssistantMessage("无法访问您的摄像头，情绪分析已关闭。请在浏览器中允许权限。", "warning");
         }
 
         // 隐藏设置界面，显示聊天界面和 AI 助理边栏
@@ -82,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         showAiBubble(initialMsg, false); // 初始消息直接显示，不需要动画流式
         messageHistory.push({ role: 'assistant', content: initialMsg });
+        assistantObservations = []; // 初始化清空观察记录
         
         // 开启第一轮回答倒计时
         startTimer('answer', currentAnswerTime);
@@ -237,10 +249,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     textInput.addEventListener('input', autoResizeTextarea);
 
+    let lastEnterTime = 0;
     textInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
+            if (e.repeat) return; // 忽略长按
+            const currentTime = new Date().getTime();
+            if (currentTime - lastEnterTime < 500) {
+                e.preventDefault();
+                // 移除因为第一次 Enter 产生的换行符
+                textInput.value = textInput.value.replace(/\n$/, '');
+                sendMessage();
+                lastEnterTime = 0;
+            } else {
+                lastEnterTime = currentTime;
+            }
         }
     });
 
@@ -312,7 +334,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     job_role: currentJobRole,
                     think_time: currentThinkTime,
                     answer_time: currentAnswerTime,
-                    messages: messageHistory 
+                    messages: messageHistory,
+                    assistant_observations: assistantObservations
                 })
             });
 
@@ -339,6 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // 清空 loading，准备接收文字
             aiBubbleContent.textContent = '';
+            let isFinished = false;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -362,6 +386,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (dataObj.error) {
                                     aiReply += `\n[Error: ${dataObj.error}]`;
                                 } else if (dataObj.text) {
+                                    if (dataObj.text.includes('[INTERVIEW_FINISHED]')) {
+                                        dataObj.text = dataObj.text.replace('[INTERVIEW_FINISHED]', '');
+                                        isFinished = true;
+                                    }
                                     aiReply += dataObj.text;
                                     // 实时更新气泡内容
                                     aiBubbleContent.textContent = aiReply;
@@ -377,8 +405,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             messageHistory.push({ role: 'assistant', content: aiReply });
 
-            // AI 提问完毕，自动开启用户的“思考时间”倒计时
-            startTimer('think', currentThinkTime);
+            if (isFinished) {
+                // 触发结束面试流程
+                setTimeout(() => {
+                    endInterviewBtn.click();
+                }, 2000); // 延迟2秒让用户看完最后一句话
+            } else {
+                // AI 提问完毕，自动开启用户的“思考时间”倒计时
+                startTimer('think', currentThinkTime);
+            }
 
         } catch (error) {
             showAiBubble(`⚠️ 网络错误: ${error.message}`);
@@ -412,7 +447,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     job_role: currentJobRole,
                     think_time: currentThinkTime,
                     answer_time: currentAnswerTime,
-                    messages: messageHistory 
+                    messages: messageHistory,
+                    assistant_observations: assistantObservations
                 })
             });
 
@@ -546,46 +582,65 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function captureAndAnalyze() {
-        if (!videoStream || !userVideo.videoWidth) return;
+        console.log("[AI 助理] 尝试截图并分析...");
+        if (!videoStream) {
+            console.warn("[AI 助理] 摄像头视频流未就绪");
+            return;
+        }
+        if (!userVideo.videoWidth) {
+            console.warn("[AI 助理] videoWidth 为 0，可能视频未加载");
+            return;
+        }
+        if (isAnalyzing) {
+            console.warn("[AI 助理] 正在分析中，跳过本次");
+            return;
+        }
 
         isAnalyzing = true;
 
-        // 截取视频画面
-        snapshotCanvas.width = userVideo.videoWidth;
-        snapshotCanvas.height = userVideo.videoHeight;
-        const ctx = snapshotCanvas.getContext('2d');
-        ctx.drawImage(userVideo, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
-        
-        // 转换成 base64 (降低点质量以减少网络传输量)
-        const base64Image = snapshotCanvas.toDataURL('image/jpeg', 0.6);
-
         try {
+            // 将图片压缩到更小的分辨率以降低传输和推理时间 (宽度设为 320)
+            const targetWidth = 320;
+            const scale = targetWidth / userVideo.videoWidth;
+            const targetHeight = userVideo.videoHeight * scale;
+
+            snapshotCanvas.width = targetWidth;
+            snapshotCanvas.height = targetHeight;
+            
+            const ctx = snapshotCanvas.getContext('2d');
+            ctx.drawImage(userVideo, 0, 0, targetWidth, targetHeight);
+            
+            // 使用 JPEG 格式并进一步压缩质量到 0.6
+            const base64Image = snapshotCanvas.toDataURL('image/jpeg', 0.6);
+            console.log(`[AI 助理] 截图成功，Base64 长度: ${base64Image.length}`);
+
             const response = await fetch('/api/analyze_emotion', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 
-                    image: base64Image 
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: base64Image })
             });
 
-            if (response.ok) {
-                // 如果成功，将间隔恢复到默认 15 秒
+            if (!response.ok) {
+                console.warn(`[AI 助理] 分析请求失败: HTTP ${response.status}`);
+                currentAnalysisInterval = 25000;
+            } else {
+                const data = await response.json();
+                console.log("[AI 助理] 接收到后端数据:", data);
                 currentAnalysisInterval = 15000;
                 
-                const data = await response.json();
-                if (data.message && data.message !== "NONE") {
+                // 去掉了对 "NONE" 的强行拦截，因为后端已经保证不会返回 NONE 了
+                if (data.message) {
                     addAssistantMessage(data.message, data.type || "info");
+                    
+                    // 记录观察信息，带上时间戳
+                    const now = new Date();
+                    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+                    assistantObservations.push(`[${timeStr}] ${data.message}`);
                 }
-            } else {
-                console.warn("情绪分析接口返回错误:", response.status, "主动降低请求频率");
-                // 遇到 500 等错误时，惩罚性延长请求间隔到 30 秒
-                currentAnalysisInterval = 30000;
             }
         } catch (error) {
-            console.error("情绪分析请求失败:", error);
-            // 遇到网络错误也延长间隔
+            console.error("[AI 助理] 截屏分析异常:", error);
+            // 异常降频
             currentAnalysisInterval = 30000;
         } finally {
             isAnalyzing = false;
@@ -611,6 +666,24 @@ document.addEventListener('DOMContentLoaded', () => {
         msgDiv.appendChild(timeSpan);
         
         assistantContent.appendChild(msgDiv);
+        
+        // =============== 同步更新中心视觉实体的状态 ===============
+        assistantAvatar.className = `assistant-avatar ${type}`;
+        
+        // 根据状态类型改变图标
+        if (type === 'warning') {
+            avatarFace.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+            assistantStatusText.textContent = "请注意状态";
+            assistantStatusText.style.color = "#fca5a5";
+        } else if (type === 'success') {
+            avatarFace.innerHTML = '<i class="fa-regular fa-face-laugh-beam"></i>';
+            assistantStatusText.textContent = "状态极佳！";
+            assistantStatusText.style.color = "#86efac";
+        } else {
+            avatarFace.innerHTML = '<i class="fa-regular fa-face-smile"></i>';
+            assistantStatusText.textContent = "保持放松，准备面试";
+            assistantStatusText.style.color = "#93c5fd";
+        }
     }
 
 });
