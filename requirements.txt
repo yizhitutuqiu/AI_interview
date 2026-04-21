@@ -3,3 +3,4 @@ uvicorn
 volcengine-python-sdk[ark]
 python-dotenv
 httpx
+opencv-python

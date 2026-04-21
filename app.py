@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from typing import List, Dict
 from volcenginesdkarkruntime import Ark
 from dotenv import load_dotenv
+import asyncio
+from utils.face_detector import detect_faces_from_base64
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -186,6 +188,38 @@ async def generate_report(request: ReportRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.post("/api/detect_face")
+async def detect_face(request: Request):
+    """
+    高频人脸检测接口：专门用于快速检测画面中是否有人脸，或者是否有多个人脸。
+    """
+    try:
+        data = await request.json()
+        base64_image = data.get("image")
+        
+        if not base64_image:
+            return JSONResponse(status_code=400, content={"error": "未提供图片数据"})
+        
+        # 移除 base64 的 data:image/jpeg;base64, 前缀
+        if "," in base64_image:
+            base64_image_clean = base64_image.split(",")[1]
+        else:
+            base64_image_clean = base64_image
+            
+        loop = asyncio.get_event_loop()
+        face_count = await loop.run_in_executor(None, detect_faces_from_base64, base64_image_clean)
+        
+        if face_count == 0:
+            return {"message": "未检测到人脸，请确保您在摄像头画面内", "type": "warning", "status": "no_face"}
+        elif face_count > 1:
+            return {"message": "检测到多个人脸，请保持单人出镜面试", "type": "warning", "status": "multi_face"}
+        else:
+            return {"message": "正常", "type": "success", "status": "ok"}
+            
+    except Exception as e:
+        logger.error(f"detect_face 发生异常: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @app.post("/api/analyze_emotion")
 async def analyze_emotion(request: Request):
     try:
@@ -201,7 +235,9 @@ async def analyze_emotion(request: Request):
         
         # 移除 base64 的 data:image/jpeg;base64, 前缀
         if "," in base64_image:
-            base64_image = base64_image.split(",")[1]
+            base64_image_clean = base64_image.split(",")[1]
+        else:
+            base64_image_clean = base64_image
             
         headers = {
             "Authorization": f"Bearer {DOUBAO_API_KEY}",
@@ -218,11 +254,21 @@ async def analyze_emotion(request: Request):
                     "content": [
                         {
                             "type": "input_image",
-                            "image_url": f"data:image/jpeg;base64,{base64_image}"
+                            "image_url": f"data:image/jpeg;base64,{base64_image_clean}"
                         },
                         {
                             "type": "input_text",
-                            "text": "观察图片中面试者的状态（如紧张、自信、走神、迷茫等）。如果状态良好，请简短地鼓励他。如果状态不好，请给出简短的建议或安慰。请严格以 JSON 格式返回，包含 'message' 和 'type' 两个字段。type 只能是 'info', 'warning', 'success' 之一。如果没看到人脸，返回 type 为 'warning'，message 提示找不到人。"
+                            "text": (
+                                "作为专业的AI面试监考助理，请严格观察图片中面试者的状态和行为规范。\n"
+                                "【重点观察】：1. 眼神是否离开正前方（即离开摄像头或屏幕区域，如看侧边、低头看下方）；2. 是否有走神、迷茫或作弊嫌疑（如眼神飘忽不定，疑似在看屏幕外的提示词或大模型）；3. 情绪是否过度紧张。\n"
+                                "【判定尺度（适中严格）】：请保持合理的监考严格度。如果发现明显的低头（疑似看手机）、大角度侧脸、或长时间盯着屏幕外的一点，必须判定为违规。但请允许正常思考时的轻微眼球转动或短暂的视线游离。\n"
+                                "【输出要求】：\n"
+                                "1. 如果发现上述违规行为，请立即给出严肃的提醒（例如：'请保持视线在屏幕上，不要看手机或别处' 或 '请注意面试纪律，保持专注'），此时 type 必须为 'warning'。\n"
+                                "2. 如果发现过度紧张或走神，给出简短的安抚建议（如：'深呼吸，放松点'），此时 type 为 'warning' 或 'info'。\n"
+                                "3. 如果被试者整体保持专注和正视前方，请给出简短的鼓励（如：'状态不错，继续保持！'），此时 type 为 'success'。\n"
+                                "4. 如果没看到人脸，提示找不到人，type 为 'warning'。\n"
+                                "请严格以 JSON 格式返回，包含 'message'（不超过30个字）和 'type'（仅限 'info', 'warning', 'success'）两个字段。"
+                            )
                         }
                     ]
                 }

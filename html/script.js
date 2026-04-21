@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let videoStream = null;
     let emotionAnalysisTimer = null;
-    let currentAnalysisInterval = 15000; // 默认 15 秒请求一次
+    let currentAnalysisInterval = 12000; // 默认 12 秒请求一次
     let isAnalyzing = false; // 防止请求并发堆叠
 
     // 面试场景状态
@@ -432,6 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         stopTimer();
         if (isRecording) stopRecording();
+        stopEmotionAnalysis();
         
         chatScreen.classList.add('hidden');
         reportScreen.classList.remove('hidden');
@@ -553,9 +554,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ================== 7. AI 助理视频分析与状态提示 ==================
+    let faceDetectionTimer = null;
+    let isDetectingFace = false;
+    
+    // 保存上一次 AI 助理情感分析的提示状态
+    let lastEmotionMessage = "正在分析您的状态，随时为您提供鼓励和建议...";
+    let lastEmotionType = "info";
+    // 标记当前是否正处于“人脸检测异常”的警告状态
+    let isFaceWarningActive = false;
+
     function startEmotionAnalysis() {
         // 延迟 3 秒让摄像头充分初始化，然后启动循环
         emotionAnalysisTimer = setTimeout(scheduleNextAnalysis, 3000);
+        // 启动高频人脸检测定时器，每 500ms (一秒两次) 执行一次
+        faceDetectionTimer = setInterval(captureAndDetectFace, 500);
     }
 
     function stopEmotionAnalysis() {
@@ -563,9 +575,56 @@ document.addEventListener('DOMContentLoaded', () => {
             clearTimeout(emotionAnalysisTimer);
             emotionAnalysisTimer = null;
         }
+        if (faceDetectionTimer) {
+            clearInterval(faceDetectionTimer);
+            faceDetectionTimer = null;
+        }
         if (videoStream) {
             videoStream.getTracks().forEach(track => track.stop());
             videoStream = null;
+        }
+    }
+
+    async function captureAndDetectFace() {
+        if (!videoStream || !userVideo.videoWidth || isDetectingFace) return;
+        isDetectingFace = true;
+        try {
+            const targetWidth = 320;
+            const scale = targetWidth / userVideo.videoWidth;
+            const targetHeight = userVideo.videoHeight * scale;
+
+            // 使用独立离屏 Canvas 防止和情感分析冲突
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = targetWidth;
+            tempCanvas.height = targetHeight;
+            const ctx = tempCanvas.getContext('2d');
+            ctx.drawImage(userVideo, 0, 0, targetWidth, targetHeight);
+            
+            const base64Image = tempCanvas.toDataURL('image/jpeg', 0.6);
+
+            const response = await fetch('/api/detect_face', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: base64Image })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                // 只有在检测到异常时才更新 UI 提示，正常情况下不覆盖情感分析的提示
+                if (data.type === 'warning') {
+                    isFaceWarningActive = true;
+                    // 这里传入 data.status ('no_face' 或 'multi_face') 作为特殊提示类型
+                    addAssistantMessage(data.message, data.status || data.type);
+                } else if (data.type === 'success' && isFaceWarningActive) {
+                    // 如果当前没有异常，且之前处于警告状态，则恢复为上次情感分析的提示
+                    isFaceWarningActive = false;
+                    addAssistantMessage(lastEmotionMessage, lastEmotionType);
+                }
+            }
+        } catch (error) {
+            console.error("[AI 助理] 人脸检测异常:", error);
+        } finally {
+            isDetectingFace = false;
         }
     }
 
@@ -626,11 +685,18 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 const data = await response.json();
                 console.log("[AI 助理] 接收到后端数据:", data);
-                currentAnalysisInterval = 15000;
+                currentAnalysisInterval = 12000;
                 
                 // 去掉了对 "NONE" 的强行拦截，因为后端已经保证不会返回 NONE 了
                 if (data.message) {
-                    addAssistantMessage(data.message, data.type || "info");
+                    // 更新最后一次的情感状态
+                    lastEmotionMessage = data.message;
+                    lastEmotionType = data.type || "info";
+                    
+                    // 仅当没有本地人脸警告时，才更新 UI
+                    if (!isFaceWarningActive) {
+                        addAssistantMessage(lastEmotionMessage, lastEmotionType);
+                    }
                     
                     // 记录观察信息，带上时间戳
                     const now = new Date();
@@ -651,8 +717,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // 覆盖模式：清空之前的所有内容，只显示最新的一条提示
         assistantContent.innerHTML = '';
         
+        // 由于特殊类型也属于 warning，消息气泡样式统一为 warning，但图标独立
+        let cssType = type;
+        if (type === 'no_face' || type === 'multi_face') {
+            cssType = 'warning';
+        }
+        
         const msgDiv = document.createElement('div');
-        msgDiv.className = `assistant-msg ${type}`;
+        msgDiv.className = `assistant-msg ${cssType}`;
         msgDiv.textContent = text;
         
         // 添加一个微小的时间戳让用户知道它更新了
@@ -668,19 +740,32 @@ document.addEventListener('DOMContentLoaded', () => {
         assistantContent.appendChild(msgDiv);
         
         // =============== 同步更新中心视觉实体的状态 ===============
-        assistantAvatar.className = `assistant-avatar ${type}`;
+        assistantAvatar.className = `assistant-avatar ${cssType}`;
         
         // 根据状态类型改变图标
-        if (type === 'warning') {
+        if (type === 'no_face') {
+            avatarFace.innerHTML = '<i class="fa-solid fa-question"></i>';
+            avatarFace.style.color = '#ffffff'; // 白色问号
+            assistantStatusText.textContent = "人去哪了？";
+            assistantStatusText.style.color = "#e2e8f0";
+        } else if (type === 'multi_face') {
+            avatarFace.innerHTML = '<i class="fa-solid fa-users"></i>';
+            avatarFace.style.color = '#ef4444'; // 红色多人
+            assistantStatusText.textContent = "检测到多个人脸！";
+            assistantStatusText.style.color = "#fca5a5";
+        } else if (type === 'warning') {
             avatarFace.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+            avatarFace.style.color = ''; // 恢复默认
             assistantStatusText.textContent = "请注意状态";
             assistantStatusText.style.color = "#fca5a5";
         } else if (type === 'success') {
             avatarFace.innerHTML = '<i class="fa-regular fa-face-laugh-beam"></i>';
+            avatarFace.style.color = ''; // 恢复默认
             assistantStatusText.textContent = "状态极佳！";
             assistantStatusText.style.color = "#86efac";
         } else {
             avatarFace.innerHTML = '<i class="fa-regular fa-face-smile"></i>';
+            avatarFace.style.color = ''; // 恢复默认
             assistantStatusText.textContent = "保持放松，准备面试";
             assistantStatusText.style.color = "#93c5fd";
         }
