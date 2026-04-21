@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +16,7 @@ load_dotenv()
 # ================= 配置读取 =================
 DOUBAO_API_KEY = os.getenv("DOUBAO_API_KEY", "YOUR_DOUBAO_API_KEY")
 DOUBAO_ENDPOINT_ID = os.getenv("DOUBAO_ENDPOINT_ID", "YOUR_ENDPOINT_ID")
+DOUBAO_LITE_ENDPOINT_ID = os.getenv("DOUBAO_LITE_ENDPOINT_ID", "doubao-seed-2-0-lite-260215")
 # ==========================================
 
 app = FastAPI(title="AI Interview Tool")
@@ -35,6 +37,9 @@ class ChatRequest(BaseModel):
     think_time: int
     answer_time: int
     messages: List[Dict[str, str]]
+
+class EmotionRequest(BaseModel):
+    image: str # Base64 格式的图片数据
 
 @app.post("/api/chat")
 async def chat_with_ai(request: ChatRequest):
@@ -155,6 +160,79 @@ async def generate_report(request: ChatRequest):
         
     except json.JSONDecodeError as e:
         return JSONResponse(status_code=500, content={"error": f"JSON解析失败，AI返回格式错误: {str(e)}\n{reply_content}"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/analyze_emotion")
+async def analyze_emotion(request: EmotionRequest):
+    if DOUBAO_API_KEY == "YOUR_DOUBAO_API_KEY" or DOUBAO_ENDPOINT_ID == "YOUR_ENDPOINT_ID":
+        return JSONResponse(status_code=500, content={"error": "系统未配置 API Key"})
+
+    try:
+        # Lite 模型的 Endpoint，固定为火山引擎给定的 Lite 视觉模型 endpoint
+        # 注意：这里直接调用 HTTP API，而非 SDK，因为要求使用 lite 多模态
+        url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+        
+        headers = {
+            "Authorization": f"Bearer {DOUBAO_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        system_prompt = (
+            "你是一个友好的AI面试助理。我将给你看一张被面试者在面试过程中的摄像头截图。"
+            "你需要判断被试者的情绪（紧张、放松、沮丧、走神等），并判断是否需要安慰、鼓励或提醒（比如提醒不要东张西望）。"
+            "你的回复必须是一句简短的话（不超过30个字）。语气要非常友好、温柔、有亲和力。"
+            "如果你觉得候选人状态很好，不需要特别的提醒，请直接返回大写的 'NONE'，不要有其他任何字符。"
+            "输出格式必须是 JSON，结构为：{\"message\": \"你的提示语\", \"type\": \"info|warning|success\"}"
+        )
+
+        payload = {
+            "model": DOUBAO_LITE_ENDPOINT_ID,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": system_prompt + "\n\n请分析我的状态并给出助理提示。"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": request.image
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+
+        # 打印 payload 排查问题
+        # print("Payload sending to Ark API:", json.dumps(payload, ensure_ascii=False)[:200] + "...")
+
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        
+        if response.status_code == 200:
+            resp_data = response.json()
+            content = resp_data["choices"][0]["message"]["content"].strip()
+            
+            if content == "NONE" or content == '"NONE"':
+                return {"message": "NONE"}
+                
+            # 清理可能的 markdown
+            if content.startswith("```json"): content = content[7:]
+            if content.startswith("```"): content = content[3:]
+            if content.endswith("```"): content = content[:-3]
+            
+            try:
+                result = json.loads(content.strip())
+                return result
+            except json.JSONDecodeError:
+                # 如果没按要求返回 JSON，就把纯文本包起来
+                return {"message": content, "type": "info"}
+        else:
+            return JSONResponse(status_code=response.status_code, content={"error": response.text})
+            
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 

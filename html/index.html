@@ -11,7 +11,9 @@
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 </head>
 <body>
-    <div class="chat-container">
+    <!-- 外层包装，包含主容器和右边栏 AI 助理 -->
+    <div class="app-wrapper">
+        <div class="chat-container">
         
         <!-- 1. 面试场景设置界面 -->
         <div id="setup-screen" class="setup-screen">
@@ -82,34 +84,43 @@
                 <button id="end-interview-btn" class="danger-btn">结束面试</button>
             </header>
             
-            <div class="main-interaction-area">
-                <!-- AI 说话内容的气泡 -->
-                <div class="ai-bubble-container hidden" id="ai-bubble-container">
-                    <div class="ai-bubble-content" id="ai-bubble-content"></div>
-                </div>
+            <div class="main-interaction-area video-layout">
+                <!-- 左侧：AI面试官 (Siri圆球等) -->
+                <div class="ai-side">
+                    <!-- AI 说话内容的气泡 -->
+                    <div class="ai-bubble-container hidden" id="ai-bubble-container">
+                        <div class="ai-bubble-content" id="ai-bubble-content"></div>
+                    </div>
 
-                <!-- 倒计时指示器 -->
-                <div class="timer-container hidden" id="timer-container">
-                    <svg class="timer-svg" viewBox="0 0 100 100">
-                        <circle class="timer-bg" cx="50" cy="50" r="45"></circle>
-                        <circle class="timer-progress" id="timer-progress" cx="50" cy="50" r="45"></circle>
-                    </svg>
-                    <div class="timer-text">
-                        <span id="timer-label" class="timer-label">思考</span>
-                        <span id="timer-value" class="timer-value">15</span>
+                    <!-- 中心的 Siri 风格巨大呼吸圆球 -->
+                    <div class="siri-center-container" id="siri-container">
+                        <div class="siri-orb-large"></div>
+                        <div class="siri-waves-large">
+                            <span></span><span></span><span></span><span></span><span></span>
+                        </div>
                     </div>
                 </div>
 
-                <!-- 中心的 Siri 风格巨大呼吸圆球 -->
-                <div class="siri-center-container" id="siri-container">
-                    <div class="siri-orb-large"></div>
-                    <div class="siri-waves-large">
-                        <span></span><span></span><span></span><span></span><span></span>
+                <!-- 右侧：被试者摄像头画面 -->
+                <div class="user-side">
+                    <video id="user-video" autoplay playsinline muted></video>
+                    <!-- 倒计时指示器 (放在用户画面上) -->
+                    <div class="timer-container hidden" id="timer-container">
+                        <svg class="timer-svg" viewBox="0 0 100 100">
+                            <circle class="timer-bg" cx="50" cy="50" r="45"></circle>
+                            <circle class="timer-progress" id="timer-progress" cx="50" cy="50" r="45"></circle>
+                        </svg>
+                        <div class="timer-text">
+                            <span id="timer-label" class="timer-label">思考</span>
+                            <span id="timer-value" class="timer-value">15</span>
+                        </div>
                     </div>
+                    <!-- 用户的最新回复会显示在这里 -->
+                    <div class="user-reply-preview" id="user-reply-preview"></div>
                 </div>
                 
-                <!-- 用户的最新回复会显示在这里 -->
-                <div class="user-reply-preview" id="user-reply-preview"></div>
+                <!-- 隐藏的 canvas 用于截取视频画面 -->
+                <canvas id="snapshot-canvas" class="hidden"></canvas>
             </div>
             
             <div class="chat-input-area">
@@ -165,6 +176,19 @@
                 
                 <div class="report-actions">
                     <button id="restart-btn" class="secondary-btn full-width">重新开始面试</button>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- 4. 右边栏：AI 面试助理 -->
+        <div id="ai-assistant-sidebar" class="ai-assistant-sidebar hidden">
+            <div class="assistant-header">
+                <h3><i class="fa-solid fa-robot"></i> AI 助理</h3>
+            </div>
+            <div class="assistant-content" id="assistant-content">
+                <div class="assistant-msg info">
+                    正在分析您的状态，随时为您提供鼓励和建议...
                 </div>
             </div>
         </div>

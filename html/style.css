@@ -24,12 +24,20 @@ body {
     justify-content: center;
     align-items: center;
     height: 100vh;
+    overflow: hidden;
+}
+
+.app-wrapper {
+    display: flex;
+    width: 100%;
+    max-width: 1200px;
+    height: 90vh;
+    gap: 20px;
+    padding: 0 20px;
 }
 
 .chat-container {
-    width: 100%;
-    max-width: 800px;
-    height: 90vh;
+    flex: 1;
     background-color: var(--chat-bg);
     border-radius: 12px;
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
@@ -148,24 +156,50 @@ body {
     color: #94a3b8;
 }
 
-/* =============== 主交互区 (Siri 圆球与气泡) =============== */
-.main-interaction-area {
+/* =============== 主交互区 (视频布局与Siri气泡) =============== */
+.main-interaction-area.video-layout {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    position: relative;
+    background: #0f172a;
+    overflow: hidden;
+}
+
+/* 左侧 AI 面试官 */
+.ai-side {
     flex: 1;
     position: relative;
     display: flex;
-    flex-direction: column;
     justify-content: center;
     align-items: center;
-    overflow: hidden;
     background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+    border-right: 1px solid var(--border-color);
+}
+
+/* 右侧 用户视频流 */
+.user-side {
+    flex: 1;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #000;
+}
+
+#user-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1); /* 镜像翻转，像照镜子 */
 }
 
 /* AI 气泡对话框 */
 .ai-bubble-container {
     position: absolute;
-    top: 10%;
-    width: 80%;
-    max-width: 600px;
+    top: 5%;
+    width: 90%;
+    max-width: 400px;
     display: flex;
     justify-content: center;
     z-index: 5;
@@ -286,11 +320,76 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    z-index: 5;
 }
 
 .user-reply-preview.visible {
     opacity: 1;
     transform: translateY(0);
+}
+
+/* =============== 右边栏 AI 助理 =============== */
+.ai-assistant-sidebar {
+    width: 300px;
+    background-color: var(--chat-bg);
+    border-radius: 12px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.assistant-header {
+    padding: 16px;
+    background-color: #1e293b;
+    border-bottom: 1px solid var(--border-color);
+    text-align: center;
+}
+
+.assistant-header h3 {
+    color: var(--siri-color-2);
+    font-size: 1.1rem;
+}
+
+.assistant-content {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.assistant-msg {
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    animation: fadeIn 0.3s ease;
+}
+
+.assistant-msg.info {
+    background-color: rgba(59, 130, 246, 0.1);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.assistant-msg.warning {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.assistant-msg.success {
+    background-color: rgba(34, 197, 94, 0.1);
+    color: #86efac;
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* =============== 倒计时指示器 =============== */

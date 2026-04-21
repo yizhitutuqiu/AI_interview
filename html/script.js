@@ -26,6 +26,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const weaknessesList = document.getElementById('weaknesses-list');
     const restartBtn = document.getElementById('restart-btn');
 
+    // 视频与 AI 助理元素
+    const userVideo = document.getElementById('user-video');
+    const snapshotCanvas = document.getElementById('snapshot-canvas');
+    const assistantSidebar = document.getElementById('ai-assistant-sidebar');
+    const assistantContent = document.getElementById('assistant-content');
+
+    let videoStream = null;
+    let emotionAnalysisTimer = null;
+    let currentAnalysisInterval = 15000; // 默认 15 秒请求一次
+    let isAnalyzing = false; // 防止请求并发堆叠
+
     // 面试场景状态
     let currentCompanyType = '';
     let currentJobRole = '';
@@ -44,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const timerValue = document.getElementById('timer-value');
 
     // ================== 1. 初始化设置界面 ==================
-    startBtn.addEventListener('click', () => {
+    startBtn.addEventListener('click', async () => {
         currentCompanyType = document.getElementById('company-type').value;
         currentJobRole = document.getElementById('job-role').value;
         currentThinkTime = parseInt(document.getElementById('think-time').value, 10);
@@ -52,9 +63,19 @@ document.addEventListener('DOMContentLoaded', () => {
         
         scenarioInfo.textContent = `面试公司: ${currentCompanyType} | 岗位: ${currentJobRole}`;
         
-        // 隐藏设置界面，显示聊天界面
+        // 尝试获取摄像头权限并开启视频流
+        try {
+            videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            userVideo.srcObject = videoStream;
+        } catch (err) {
+            console.error("无法获取摄像头权限:", err);
+            addAssistantMessage("未能获取到摄像头权限，视频流分析功能已停用。", "warning");
+        }
+
+        // 隐藏设置界面，显示聊天界面和 AI 助理边栏
         setupScreen.classList.add('hidden');
         chatScreen.classList.remove('hidden');
+        assistantSidebar.classList.remove('hidden');
 
         // 初始化 AI 第一句话
         const initialMsg = `您好！我是您的AI面试官。欢迎您来面试【${currentCompanyType}】的【${currentJobRole}】岗位。今天我们将进行一场专业面试，您准备好了吗？如果准备好了，请简单做个自我介绍吧。`;
@@ -64,6 +85,11 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 开启第一轮回答倒计时
         startTimer('answer', currentAnswerTime);
+
+        // 开启情绪分析定时任务 (每 5 秒一次)
+        if (videoStream) {
+            startEmotionAnalysis();
+        }
     });
 
     // ================== 1.5 倒计时逻辑 ==================
@@ -291,8 +317,16 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (!response.ok) {
-                const errData = await response.json();
-                showAiBubble(`⚠️ 发生错误: ${errData.error || '未知错误'}`);
+                // 读取原始文本，防止不是 json
+                const errText = await response.text();
+                let errMsg = '未知错误';
+                try {
+                    const errData = JSON.parse(errText);
+                    errMsg = errData.error || errText;
+                } catch(e) {
+                    errMsg = errText;
+                }
+                showAiBubble(`⚠️ 发生错误: ${errMsg}`);
                 siriContainer.classList.remove('speaking');
                 sendBtn.disabled = false;
                 return;
@@ -481,4 +515,102 @@ document.addEventListener('DOMContentLoaded', () => {
     restartBtn.addEventListener('click', () => {
         window.location.reload();
     });
+
+    // ================== 7. AI 助理视频分析与状态提示 ==================
+    function startEmotionAnalysis() {
+        // 延迟 3 秒让摄像头充分初始化，然后启动循环
+        emotionAnalysisTimer = setTimeout(scheduleNextAnalysis, 3000);
+    }
+
+    function stopEmotionAnalysis() {
+        if (emotionAnalysisTimer) {
+            clearTimeout(emotionAnalysisTimer);
+            emotionAnalysisTimer = null;
+        }
+        if (videoStream) {
+            videoStream.getTracks().forEach(track => track.stop());
+            videoStream = null;
+        }
+    }
+
+    function scheduleNextAnalysis() {
+        // 防止上一次请求还没回来，就发起了下一次
+        if (!isAnalyzing) {
+            // 这里不使用 await，让 captureAndAnalyze 异步（后台）去执行，不阻塞当前的定时器调度
+            captureAndAnalyze().catch(console.error);
+        }
+        
+        // 无论上一次是否还在 analyzing，定时器都会继续排队下一次。
+        // 如果下一次触发时仍在 analyzing，就会跳过当次抓拍。
+        emotionAnalysisTimer = setTimeout(scheduleNextAnalysis, currentAnalysisInterval);
+    }
+
+    async function captureAndAnalyze() {
+        if (!videoStream || !userVideo.videoWidth) return;
+
+        isAnalyzing = true;
+
+        // 截取视频画面
+        snapshotCanvas.width = userVideo.videoWidth;
+        snapshotCanvas.height = userVideo.videoHeight;
+        const ctx = snapshotCanvas.getContext('2d');
+        ctx.drawImage(userVideo, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+        
+        // 转换成 base64 (降低点质量以减少网络传输量)
+        const base64Image = snapshotCanvas.toDataURL('image/jpeg', 0.6);
+
+        try {
+            const response = await fetch('/api/analyze_emotion', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    image: base64Image 
+                })
+            });
+
+            if (response.ok) {
+                // 如果成功，将间隔恢复到默认 15 秒
+                currentAnalysisInterval = 15000;
+                
+                const data = await response.json();
+                if (data.message && data.message !== "NONE") {
+                    addAssistantMessage(data.message, data.type || "info");
+                }
+            } else {
+                console.warn("情绪分析接口返回错误:", response.status, "主动降低请求频率");
+                // 遇到 500 等错误时，惩罚性延长请求间隔到 30 秒
+                currentAnalysisInterval = 30000;
+            }
+        } catch (error) {
+            console.error("情绪分析请求失败:", error);
+            // 遇到网络错误也延长间隔
+            currentAnalysisInterval = 30000;
+        } finally {
+            isAnalyzing = false;
+        }
+    }
+
+    function addAssistantMessage(text, type = 'info') {
+        // 覆盖模式：清空之前的所有内容，只显示最新的一条提示
+        assistantContent.innerHTML = '';
+        
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `assistant-msg ${type}`;
+        msgDiv.textContent = text;
+        
+        // 添加一个微小的时间戳让用户知道它更新了
+        const timeSpan = document.createElement('span');
+        timeSpan.style.display = 'block';
+        timeSpan.style.fontSize = '0.75rem';
+        timeSpan.style.color = 'rgba(255,255,255,0.4)';
+        timeSpan.style.marginTop = '6px';
+        const now = new Date();
+        timeSpan.textContent = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        msgDiv.appendChild(timeSpan);
+        
+        assistantContent.appendChild(msgDiv);
+    }
+
 });
