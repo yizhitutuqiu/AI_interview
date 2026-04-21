@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 面试官</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- 引入 FontAwesome 以使用麦克风图标 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 引入 ECharts 用于绘制雷达图 -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+</head>
+<body>
+    <div class="chat-container">
+        
+        <!-- 1. 面试场景设置界面 -->
+        <div id="setup-screen" class="setup-screen">
+            <div class="setup-card">
+                <div class="setup-header">
+                    <h2><i class="fa-solid fa-gear"></i> 设定面试场景</h2>
+                    <p>请选择您要面试的公司类型和岗位，AI面试官将为您量身定制面试体验。</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="company-type">目标公司类型</label>
+                    <select id="company-type">
+                        <option value="互联网企业">互联网企业</option>
+                        <option value="军工企业">军工企业</option>
+                        <option value="独角兽科技公司">独角兽科技公司</option>
+                        <option value="外资企业">外资企业 (MNC)</option>
+                        <option value="国有企业">国有企业 (SOE)</option>
+                        <option value="初创公司">初创公司</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="job-role">应聘岗位</label>
+                    <select id="job-role">
+                        <option value="算法工程师">算法工程师</option>
+                        <option value="前端工程师">前端工程师</option>
+                        <option value="全栈开发工程师">全栈开发工程师</option>
+                        <option value="测试开发工程师">测试开发工程师</option>
+                        <option value="HR (人力资源)">HR (人力资源)</option>
+                        <option value="产品经理">产品经理</option>
+                        <option value="后端工程师">后端工程师</option>
+                    </select>
+                </div>
+
+                <div class="form-group-row">
+                    <div class="form-group half">
+                        <label for="think-time">思考限时</label>
+                        <select id="think-time">
+                            <option value="10">10 秒</option>
+                            <option value="15" selected>15 秒</option>
+                            <option value="30">30 秒</option>
+                            <option value="60">60 秒</option>
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label for="answer-time">回答限时</label>
+                        <select id="answer-time">
+                            <option value="30">30 秒</option>
+                            <option value="60" selected>60 秒</option>
+                            <option value="120">2 分钟</option>
+                            <option value="180">3 分钟</option>
+                            <option value="300">5 分钟</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button id="start-btn" class="primary-btn full-width">开始面试</button>
+            </div>
+        </div>
+
+        <!-- 2. 面试主界面 -->
+        <div id="chat-screen" class="chat-screen hidden">
+            <header class="chat-header">
+                <div class="header-info">
+                    <h2><i class="fa-solid fa-user-tie"></i> AI 面试官</h2>
+                    <p id="scenario-info">准备中...</p>
+                </div>
+                <button id="end-interview-btn" class="danger-btn">结束面试</button>
+            </header>
+            
+            <div class="main-interaction-area">
+                <!-- AI 说话内容的气泡 -->
+                <div class="ai-bubble-container hidden" id="ai-bubble-container">
+                    <div class="ai-bubble-content" id="ai-bubble-content"></div>
+                </div>
+
+                <!-- 倒计时指示器 -->
+                <div class="timer-container hidden" id="timer-container">
+                    <svg class="timer-svg" viewBox="0 0 100 100">
+                        <circle class="timer-bg" cx="50" cy="50" r="45"></circle>
+                        <circle class="timer-progress" id="timer-progress" cx="50" cy="50" r="45"></circle>
+                    </svg>
+                    <div class="timer-text">
+                        <span id="timer-label" class="timer-label">思考</span>
+                        <span id="timer-value" class="timer-value">15</span>
+                    </div>
+                </div>
+
+                <!-- 中心的 Siri 风格巨大呼吸圆球 -->
+                <div class="siri-center-container" id="siri-container">
+                    <div class="siri-orb-large"></div>
+                    <div class="siri-waves-large">
+                        <span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                </div>
+                
+                <!-- 用户的最新回复会显示在这里 -->
+                <div class="user-reply-preview" id="user-reply-preview"></div>
+            </div>
+            
+            <div class="chat-input-area">
+                <button id="mic-btn" class="icon-btn" title="点击开始语音输入">
+                    <i class="fa-solid fa-microphone"></i>
+                </button>
+                <textarea id="text-input" placeholder="输入您的回答... (按 Enter 发送)" rows="1"></textarea>
+                <button id="send-btn" class="primary-btn">发送</button>
+            </div>
+            <div id="voice-status" class="voice-status hidden">正在聆听... (请说话)</div>
+        </div>
+
+        <!-- 3. 面试报告界面 -->
+        <div id="report-screen" class="report-screen hidden">
+            <div class="report-card">
+                <div class="report-header">
+                    <h2><i class="fa-solid fa-chart-line"></i> 面试综合评估报告</h2>
+                    <p id="report-meta">AI 正在为您生成报告，请稍候...</p>
+                </div>
+                
+                <div id="report-content" class="report-content hidden">
+                    <div class="score-section">
+                        <div class="total-score">
+                            <span class="score-label">综合得分</span>
+                            <span class="score-number" id="final-score">0</span>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-section">
+                        <div id="radar-chart" style="width: 100%; height: 300px;"></div>
+                    </div>
+                    
+                    <div class="analysis-section">
+                        <h3><i class="fa-solid fa-comment-dots"></i> 综合点评</h3>
+                        <p id="overall-comment">加载中...</p>
+                    </div>
+                    
+                    <div class="analysis-section">
+                        <h3><i class="fa-solid fa-lightbulb"></i> 优势与亮点</h3>
+                        <ul id="strengths-list"></ul>
+                    </div>
+                    
+                    <div class="analysis-section">
+                        <h3><i class="fa-solid fa-arrow-trend-up"></i> 改进建议</h3>
+                        <ul id="weaknesses-list"></ul>
+                    </div>
+                </div>
+                
+                <div id="report-loading" class="report-loading">
+                    <div class="loader"></div>
+                    <p>正在分析您的回答，请耐心等待...</p>
+                </div>
+                
+                <div class="report-actions">
+                    <button id="restart-btn" class="secondary-btn full-width">重新开始面试</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
