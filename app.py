@@ -210,7 +210,7 @@ async def detect_face(request: Request):
         face_count = await loop.run_in_executor(None, detect_faces_from_base64, base64_image_clean)
         
         if face_count == 0:
-            return {"message": "未检测到人脸，请确保您在摄像头画面内", "type": "warning", "status": "no_face"}
+            return {"message": "未检测到人脸，请正视摄像头或确保在画面内", "type": "warning", "status": "no_face"}
         elif face_count > 1:
             return {"message": "检测到多个人脸，请保持单人出镜面试", "type": "warning", "status": "multi_face"}
         else:
@@ -261,7 +261,7 @@ async def analyze_emotion(request: Request):
                             "text": (
                                 "作为专业的AI面试监考助理，请严格观察图片中面试者的状态和行为规范。\n"
                                 "【重点观察】：1. 眼神是否离开正前方（即离开摄像头或屏幕区域，如看侧边、低头看下方）；2. 是否有走神、迷茫或作弊嫌疑（如眼神飘忽不定，疑似在看屏幕外的提示词或大模型）；3. 情绪是否过度紧张。\n"
-                                "【判定尺度（非常严格）】：请保持高标准的监考严格度。只要被试者出现低头（疑似看手机）、脸部侧偏、或者视线明显偏离正前方区域，即立刻判定为违规。仅允许非常轻微的正常眨眼。\n"
+                                "【判定尺度】：请保持略高标准的监考严格度。当被试者出现明显的低头（疑似看手机）、脸部侧偏、或者视线明显偏离正前方区域，即立刻判定为违规。允许正常眨眼。\n"
                                 "【输出要求】：\n"
                                 "1. 如果发现上述违规行为，请立即给出严肃的提醒（例如：'请保持视线在屏幕上，不要看手机或别处' 或 '请注意面试纪律，保持专注'），此时 type 必须为 'warning'。\n"
                                 "2. 如果发现过度紧张，给出简短的安抚建议（如：'深呼吸，放松点'），此时 type 为 'warning' 或 'info'。\n"

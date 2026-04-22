@@ -498,22 +498,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     { name: '文化匹配度', max: 100 }
                 ],
                 axisName: {
-                    color: '#cbd5e1',
+                    color: '#5f6368',
                     fontSize: 14
                 },
                 splitArea: {
                     areaStyle: {
-                        color: ['rgba(37, 99, 235, 0.1)', 'rgba(37, 99, 235, 0.2)', 'rgba(37, 99, 235, 0.4)', 'rgba(37, 99, 235, 0.6)', 'rgba(37, 99, 235, 0.8)'].reverse()
+                        color: ['rgba(26, 115, 232, 0.02)', 'rgba(26, 115, 232, 0.05)', 'rgba(26, 115, 232, 0.08)', 'rgba(26, 115, 232, 0.12)', 'rgba(26, 115, 232, 0.15)'].reverse()
                     }
                 },
                 axisLine: {
                     lineStyle: {
-                        color: 'rgba(255, 255, 255, 0.2)'
+                        color: 'rgba(0, 0, 0, 0.1)'
                     }
                 },
                 splitLine: {
                     lineStyle: {
-                        color: 'rgba(255, 255, 255, 0.2)'
+                        color: 'rgba(0, 0, 0, 0.1)'
                     }
                 }
             },
@@ -530,11 +530,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             dimensions.culture_fit || 0
                         ],
                         name: '综合评分',
-                        itemStyle: { color: '#8b5cf6' },
-                        areaStyle: { color: 'rgba(139, 92, 246, 0.4)' },
+                        itemStyle: { color: '#1a73e8' },
+                        areaStyle: { color: 'rgba(26, 115, 232, 0.2)' },
                         label: {
                             show: true,
-                            color: '#fff'
+                            color: '#202124'
                         }
                     }
                 ]
@@ -739,7 +739,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeSpan = document.createElement('span');
         timeSpan.style.display = 'block';
         timeSpan.style.fontSize = '0.75rem';
-        timeSpan.style.color = 'rgba(255,255,255,0.4)';
+        timeSpan.style.color = 'rgba(0,0,0,0.4)';
         timeSpan.style.marginTop = '6px';
         const now = new Date();
         timeSpan.textContent = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -753,29 +753,29 @@ document.addEventListener('DOMContentLoaded', () => {
         // 根据状态类型改变图标
         if (type === 'no_face') {
             avatarFace.innerHTML = '<i class="fa-solid fa-question"></i>';
-            avatarFace.style.color = '#ffffff'; // 白色问号
+            avatarFace.style.color = '#5f6368'; // 灰色问号
             assistantStatusText.textContent = "人去哪了？";
-            assistantStatusText.style.color = "#e2e8f0";
+            assistantStatusText.style.color = "#5f6368";
         } else if (type === 'multi_face') {
             avatarFace.innerHTML = '<i class="fa-solid fa-users"></i>';
-            avatarFace.style.color = '#ef4444'; // 红色多人
+            avatarFace.style.color = '#d93025'; // 红色多人
             assistantStatusText.textContent = "检测到多个人脸！";
-            assistantStatusText.style.color = "#fca5a5";
+            assistantStatusText.style.color = "#d93025";
         } else if (type === 'warning') {
             avatarFace.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
             avatarFace.style.color = ''; // 恢复默认
             assistantStatusText.textContent = "请注意状态";
-            assistantStatusText.style.color = "#fca5a5";
+            assistantStatusText.style.color = "#d93025";
         } else if (type === 'success') {
             avatarFace.innerHTML = '<i class="fa-regular fa-face-laugh-beam"></i>';
             avatarFace.style.color = ''; // 恢复默认
             assistantStatusText.textContent = "状态极佳！";
-            assistantStatusText.style.color = "#86efac";
+            assistantStatusText.style.color = "#188038";
         } else {
             avatarFace.innerHTML = '<i class="fa-regular fa-face-smile"></i>';
             avatarFace.style.color = ''; // 恢复默认
             assistantStatusText.textContent = "保持放松，准备面试";
-            assistantStatusText.style.color = "#93c5fd";
+            assistantStatusText.style.color = "#1a73e8";
         }
     }
 
