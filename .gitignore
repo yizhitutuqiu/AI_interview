@@ -24,6 +24,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
+*.zip
 
 # IDEs
 .idea/
