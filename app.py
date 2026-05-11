@@ -123,70 +123,139 @@ async def generate_report(request: ReportRequest):
             content={"error": "系统未配置：请先在 .env 文件中填写 DOUBAO_API_KEY 和 DOUBAO_ENDPOINT_ID。"}
         )
 
-    # 提取行为观察记录
-    obs_text = "\n".join([f"- {obs}" for obs in request.assistant_observations]) if request.assistant_observations else "无特别行为观察记录"
+    client = Ark(api_key=DOUBAO_API_KEY)
+    loop = asyncio.get_event_loop()
 
-    # 构造用于生成评估报告的系统提示词，强制要求返回 JSON 格式
-    system_prompt = (
-        f"你是一个资深的HR和技术面试官。请根据以下候选人与AI面试官的对话历史，以及AI助理对候选人在面试过程中的行为状态观察，对候选人进行全面的面试评估。\n"
-        f"候选人应聘的是【{request.company_type}】的【{request.job_role}】岗位。\n"
-        f"【AI助理行为观察记录】:\n{obs_text}\n\n"
-        f"请综合候选人的回答内容以及行为表现（如是否紧张、是否走神等），以严格的 JSON 格式输出你的评估结果，不要包含任何 markdown 代码块标记(如 ```json)或其他多余说明文字。\n"
-        f"JSON 结构必须如下：\n"
+    # 1. 提取问答对
+    qa_pairs = []
+    current_q = None
+    for msg in request.messages:
+        if msg["role"] == "system":
+            continue
+        if msg["role"] == "assistant":
+            current_q = msg["content"]
+        elif msg["role"] == "user" and current_q:
+            qa_pairs.append((current_q, msg["content"]))
+            current_q = None
+
+    # 2. 定义异步单题打分任务
+    async def score_qa_pair_async(question, answer):
+        prompt = (
+            f"你是一个专业的面试评估专家。请针对以下【单一问答回合】进行独立打分。\n"
+            f"候选人应聘的是【{request.company_type}】的【{request.job_role}】岗位。\n"
+            f"【面试官提问】：{question}\n"
+            f"【候选人回答】：{answer}\n\n"
+            f"请参照STAR法则评估候选人的回答质量，给出0-100的各项分数，并给出一个【置信度权重(0.0-1.0)】。\n"
+            f"置信度说明：如果该回答非常详细、展现了明显的能力特征，置信度设为0.8-1.0；如果回答极其简短、无关痛痒或跑题，置信度设为0.1-0.4。\n"
+            f"必须严格返回JSON格式如下：\n"
+            "{\n"
+            '  "confidence": 0.85,\n'
+            '  "dimensions": {\n'
+            '    "professional": 80,\n'
+            '    "communication": 90,\n'
+            '    "logic": 85,\n'
+            '    "adaptability": 80,\n'
+            '    "culture_fit": 85\n'
+            "  },\n"
+            '  "comment": "对本题回答的简短点评"\n'
+            "}"
+        )
+        try:
+            response = await loop.run_in_executor(
+                None, 
+                lambda: client.chat.completions.create(
+                    model=DOUBAO_ENDPOINT_ID,
+                    messages=[{"role": "system", "content": prompt}]
+                )
+            )
+            content = response.choices[0].message.content.strip()
+            if content.startswith("```json"): content = content[7:]
+            if content.startswith("```"): content = content[3:]
+            if content.endswith("```"): content = content[:-3]
+            return json.loads(content.strip())
+        except Exception as e:
+            logger.error(f"逐题打分失败: {e}")
+            return None
+
+    # 3. 并发执行逐题打分
+    tasks = [score_qa_pair_async(q, a) for q, a in qa_pairs]
+    per_question_results = await asyncio.gather(*tasks)
+    
+    # 4. 过滤有效结果并计算加权平均分
+    valid_results = [res for res in per_question_results if res and "confidence" in res and "dimensions" in res]
+    
+    final_dimensions = {
+        "professional": 0, "communication": 0, "logic": 0, "adaptability": 0, "culture_fit": 0
+    }
+    total_confidence = 0.0
+    
+    if valid_results:
+        for res in valid_results:
+            conf = res.get("confidence", 0.5)
+            total_confidence += conf
+            for dim in final_dimensions.keys():
+                final_dimensions[dim] += res["dimensions"].get(dim, 0) * conf
+                
+        if total_confidence > 0:
+            for dim in final_dimensions.keys():
+                final_dimensions[dim] = int(final_dimensions[dim] / total_confidence)
+        else:
+            final_dimensions = {k: 0 for k in final_dimensions}
+    else:
+        # 降级处理
+        final_dimensions = {"professional": 60, "communication": 60, "logic": 60, "adaptability": 60, "culture_fit": 60}
+
+    overall_score = int(sum(final_dimensions.values()) / 5) if final_dimensions else 0
+
+    # 5. 综合评价 (大模型最终总结)
+    obs_text = "\n".join([f"- {obs}" for obs in request.assistant_observations]) if request.assistant_observations else "无特别行为观察记录"
+    per_q_comments = "\n".join([f"- 问答回合点评: {res.get('comment', '')} (置信度: {res.get('confidence', 0)})" for res in valid_results])
+    
+    final_summary_prompt = (
+        f"你是一个资深的HR和技术面试官。候选人应聘的是【{request.company_type}】的【{request.job_role}】岗位。\n"
+        f"我已经通过逐题评估算法得出了候选人的各项加权最终得分，如下：\n"
+        f"综合得分: {overall_score}\n"
+        f"维度得分: {json.dumps(final_dimensions, ensure_ascii=False)}\n\n"
+        f"以下是候选人的各题独立点评细节：\n{per_q_comments}\n\n"
+        f"以下是【AI助理行为观察记录】(包含走神、紧张等状态):\n{obs_text}\n\n"
+        f"请基于上述的最终得分、逐题点评和行为观察，为该候选人生成最终的文字评估报告。\n"
+        f"必须严格返回JSON格式如下，不要包含任何 markdown 标记：\n"
         "{\n"
-        '  "total_score": 85, // 综合得分，0-100的整数\n'
-        '  "dimensions": {\n'
-        '    "professional": 80, // 专业技能得分 0-100\n'
-        '    "communication": 90, // 沟通表达能力 0-100\n'
-        '    "logic": 85, // 逻辑思维 0-100\n'
-        '    "adaptability": 80, // 应变与抗压能力 0-100\n'
-        '    "culture_fit": 85 // 企业文化匹配度 0-100\n'
-        "  },\n"
-        '  "overall_comment": "这里是一段针对候选人的综合点评（大约100字左右）。",\n'
-        '  "strengths": ["优点1", "优点2", "优点3"], // 亮点列表\n'
-        '  "weaknesses": ["改进建议1", "改进建议2"] // 不足与改进建议列表\n'
+        '  "overall_comment": "这里是一段针对候选人的综合点评（结合各项得分和行为表现，大约150字左右）。",\n'
+        '  "strengths": ["优点1", "优点2", "优点3"], // 结合逐题点评提炼的亮点\n'
+        '  "weaknesses": ["改进建议1", "改进建议2"] // 结合逐题点评和行为观察提炼的不足\n'
         "}"
     )
-    
-    # 提取历史对话内容
-    conversation_history = "【对话历史记录】：\n"
-    for msg in request.messages:
-        role_name = "面试官" if msg["role"] == "assistant" else "候选人"
-        # 忽略掉原始的 system message
-        if msg["role"] != "system":
-            conversation_history += f"{role_name}：{msg['content']}\n"
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": conversation_history}
-    ]
 
     try:
-        client = Ark(api_key=DOUBAO_API_KEY)
-        
-        response = client.chat.completions.create(
-            model=DOUBAO_ENDPOINT_ID,
-            messages=messages,
-            # 某些模型支持 response_format={"type": "json_object"}，为稳妥起见这里主要靠 prompt 约束
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.chat.completions.create(
+                model=DOUBAO_ENDPOINT_ID,
+                messages=[{"role": "system", "content": final_summary_prompt}]
+            )
         )
-        
         reply_content = response.choices[0].message.content.strip()
         
-        # 简单清理可能存在的 markdown 标记
-        if reply_content.startswith("```json"):
-            reply_content = reply_content[7:]
-        if reply_content.startswith("```"):
-            reply_content = reply_content[3:]
-        if reply_content.endswith("```"):
-            reply_content = reply_content[:-3]
+        if reply_content.startswith("```json"): reply_content = reply_content[7:]
+        if reply_content.startswith("```"): reply_content = reply_content[3:]
+        if reply_content.endswith("```"): reply_content = reply_content[:-3]
             
         report_data = json.loads(reply_content.strip())
-        return JSONResponse(content=report_data)
         
-    except json.JSONDecodeError as e:
-        return JSONResponse(status_code=500, content={"error": f"JSON解析失败，AI返回格式错误: {str(e)}\n{reply_content}"})
+        # 组装最终结果
+        final_report = {
+            "total_score": overall_score,
+            "dimensions": final_dimensions,
+            "overall_comment": report_data.get("overall_comment", "无"),
+            "strengths": report_data.get("strengths", []),
+            "weaknesses": report_data.get("weaknesses", [])
+        }
+        return JSONResponse(content=final_report)
+        
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.error(f"生成最终总结失败: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"生成最终总结失败: {str(e)}"})
 
 @app.post("/api/detect_face")
 async def detect_face(request: Request):

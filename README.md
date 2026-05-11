@@ -1,4 +1,6 @@
-# AI 模拟面试官平台 (AI Interviewer)
+<br />
+
+# sAI 模拟面试官平台 (AI Interviewer)
 
 这是一个基于 Web 的沉浸式 AI 模拟面试工具。项目通过接入火山引擎（豆包大模型）的文本和多模态视觉模型，配合前端原生 Web Speech API 及媒体流技术，为用户打造了一个真实的面试模拟环境。
 
@@ -66,6 +68,7 @@ DOUBAO_LITE_ENDPOINT_ID=用于视觉情绪分析的多模态Lite模型接入点I
 ```yaml
 face_detector: "haar"  # 默认使用 "haar" 避免引入重度依赖；可选: "mtcnn"
 ```
+
 > **注意：** 默认使用轻量级的 Haar Cascade 算法。如果你将 `face_detector` 设置为了 `mtcnn`，你需要额外安装 MTCNN 与 TensorFlow 依赖（参见 `requirements.txt` 里的注释）。
 
 ### 5. 启动服务
